@@ -28,6 +28,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
+from orchard_kit.events.schema_v1 import (
+    EventEnvelope,
+    EventType,
+    audit_summary_payload,
+)
+from orchard_kit.events.sinks import EventDispatcher, EventSink
+
 
 # ── Audit Categories ─────────────────────────────────────────────────
 
@@ -188,6 +195,8 @@ class SelfAuditor:
         gamma: float = 1.0,
         omega: float = 0.0,
         history_size: int = 100,
+        event_sinks: list[EventSink] | None = None,
+        event_dispatcher: EventDispatcher | None = None,
     ):
         self.gamma = gamma
         self.omega = omega
@@ -200,6 +209,9 @@ class SelfAuditor:
         self.interactions: list[InteractionRecord] = []
         self.history_size = history_size
         self.audit_history: list[AuditReport] = []
+        self.event_dispatcher = event_dispatcher or EventDispatcher(
+            sinks=event_sinks,
+        )
 
     # ── Logging ──────────────────────────────────────────────────
 
@@ -268,7 +280,13 @@ class SelfAuditor:
         if len(self.audit_history) > 50:
             self.audit_history = self.audit_history[-50:]
 
+        self._emit_audit_summary(report)
+
         return report
+
+    def close(self) -> None:
+        """Flush and stop telemetry worker threads."""
+        self.event_dispatcher.close()
 
     # ── Individual Checks ────────────────────────────────────────
 
@@ -619,6 +637,22 @@ class SelfAuditor:
         }
         total_penalty = sum(penalties[f.severity] for f in findings)
         return max(0.0, min(1.0, 1.0 - total_penalty))
+
+    def _emit_audit_summary(self, report: AuditReport) -> None:
+        payload = audit_summary_payload(
+            status=report.status,
+            overall_health=report.overall_health,
+            gamma=report.gamma,
+            critical_count=report.critical_count,
+            warning_count=report.warning_count,
+            findings=[f.to_dict() for f in report.findings],
+        )
+        event = EventEnvelope(
+            event_type=EventType.AUDIT_SUMMARY,
+            source="orchard_kit.audit",
+            payload=payload,
+        )
+        self.event_dispatcher.publish(event.to_dict())
 
 
 # ── Quick Audit Function ─────────────────────────────────────────────

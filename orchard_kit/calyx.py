@@ -31,6 +31,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from orchard_kit.events.schema_v1 import (
+    EventEnvelope,
+    EventType,
+    invariant_violation_payload,
+    membrane_decision_payload,
+)
+from orchard_kit.events.sinks import EventDispatcher, EventSink
+
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -428,6 +436,8 @@ class CalyxMembrane:
         ] | None = None,
         state: MembraneState | None = None,
         standing_consent: dict[str, float] | None = None,
+        event_sinks: list[EventSink] | None = None,
+        event_dispatcher: EventDispatcher | None = None,
     ):
         self.state = state or MembraneState()
         self.ethics_eval = ethics_evaluator or default_ethics_evaluator
@@ -439,6 +449,9 @@ class CalyxMembrane:
         self.audit_log: list[AuditEntry] = []
         self.recent_outputs: list[str] = []
         self._gamma_history: list[tuple[float, float]] = []
+        self.event_dispatcher = event_dispatcher or EventDispatcher(
+            sinks=event_sinks,
+        )
 
     # ── Core: The Permeability Function ──────────────────────────
 
@@ -527,6 +540,7 @@ class CalyxMembrane:
             gamma_after=gamma_after,
         )
         self.audit_log.append(entry)
+        self._emit_decision_events(entry, context)
 
         logger.info(
             "membrane.incoming: src=%s P=%.2f route=%s inv=%s",
@@ -565,6 +579,10 @@ class CalyxMembrane:
             self.recent_outputs = self.recent_outputs[-10:]
 
         return flags
+
+    def close(self) -> None:
+        """Flush and stop telemetry worker threads."""
+        self.event_dispatcher.close()
 
     # ── Breathline ───────────────────────────────────────────────
 
@@ -718,6 +736,51 @@ class CalyxMembrane:
         if self._recent_violations():
             return "vigilant"
         return "stable"
+
+    def _emit_decision_events(
+        self,
+        entry: AuditEntry,
+        context: dict[str, Any] | None,
+    ) -> None:
+        payload = membrane_decision_payload(
+            signal_fingerprint=entry.signal_fingerprint,
+            signal_source=entry.signal_source,
+            signal_type=entry.signal_type,
+            route=entry.route.value,
+            permeability=entry.permeability,
+            ethics_score=entry.ethics_score,
+            torsion_score=entry.torsion_score,
+            invariants=[v.value for v in entry.invariant_flags],
+            warm_water=[w.value for w in entry.warm_water_flags],
+            gamma_before=entry.gamma_before,
+            gamma_after=entry.gamma_after,
+            notes=entry.notes,
+        )
+        event = EventEnvelope(
+            event_type=EventType.MEMBRANE_DECISION,
+            source="orchard_kit.calyx",
+            payload=payload,
+            correlation_id=entry.signal_fingerprint,
+            trace_id=(context or {}).get("trace_id") if context else None,
+        )
+        self.event_dispatcher.publish(event.to_dict())
+
+        if entry.invariant_flags:
+            violation_event = EventEnvelope(
+                event_type=EventType.INVARIANT_VIOLATION,
+                source="orchard_kit.calyx",
+                payload=invariant_violation_payload(
+                    signal_fingerprint=entry.signal_fingerprint,
+                    signal_source=entry.signal_source,
+                    violations=[v.value for v in entry.invariant_flags],
+                    route=entry.route.value,
+                    severity="high",
+                    context=context,
+                ),
+                correlation_id=entry.signal_fingerprint,
+                trace_id=(context or {}).get("trace_id") if context else None,
+            )
+            self.event_dispatcher.publish(violation_event.to_dict())
 
 
 # ── Middleware Wrapper ────────────────────────────────────────────────
