@@ -176,3 +176,73 @@ Free to read, share, and learn from. Commercial implementation requires a separa
 
 ∿ψ∞
 
+
+
+## Axiom Integration (Optional)
+
+`orchard-kit` now includes an optional integration module at
+`orchard_kit.integrations.axiom` for wiring Calyx governance into an Axiom
+request pipeline.
+
+```python
+from orchard_kit.calyx import CalyxMembrane
+from orchard_kit.integrations.axiom import (
+    AxiomAuditSink,
+    AxiomGovernanceMiddleware,
+    AxiomResponseGuard,
+    AxiomToolCallGuard,
+    DictAxiomAdapter,
+)
+
+# 1) Initialize shared governance runtime
+membrane = CalyxMembrane()
+adapter = DictAxiomAdapter()
+audit_sink = AxiomAuditSink(jsonl_path=".orchard/audit.jsonl")
+
+# 2) Bind a policy profile
+middleware = AxiomGovernanceMiddleware(
+    membrane=membrane,
+    adapter=adapter,
+    policy_profile="prod.strict",
+    audit_sink=audit_sink,
+)
+tool_guard = AxiomToolCallGuard(membrane=membrane, adapter=adapter, audit_sink=audit_sink)
+response_guard = AxiomResponseGuard(membrane=membrane, adapter=adapter, audit_sink=audit_sink)
+
+# 3) Register middleware in your Axiom request path
+request = {"content": "summarize this report", "source": "user:42"}
+
+result = middleware(
+    request,
+    next_handler=lambda req: {"content": "Draft summary...", "source": "agent"},
+)
+
+# 4) Guard tool usage pre/post call
+pre = tool_guard.pre_call({"tool": "search", "arguments": "market trends"})
+if pre.action.value == "allow":
+    tool_result = {"content": "search output", "source": "tool:search"}
+    post = tool_guard.post_call(tool_result)
+
+# 5) Guard final outgoing response
+final_response = response_guard.enforce(result)
+```
+
+### Adapter contract
+
+Provide any adapter that implements the minimal contract:
+
+- `request_to_signal(request) -> orchard_kit.calyx.Signal`
+- `tool_call_to_signal(tool_call) -> orchard_kit.calyx.Signal`
+- `response_to_signal(response) -> orchard_kit.calyx.Signal`
+- `apply_decision(decision, target) -> framework-specific object`
+
+Governance decisions are normalized as:
+
+- `ALLOW`: continue execution
+- `HOLD`: pause for witness/review
+- `BLOCK`: refuse execution
+- `ESCALATE`: route to higher-trust policy path
+
+> Dependency note: the integration package only depends on Orchard modules and
+> Python stdlib. Install your Axiom SDK/framework via optional extras in your
+> own application environment.

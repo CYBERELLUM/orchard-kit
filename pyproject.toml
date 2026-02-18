@@ -39,3 +39,8 @@ Documentation = "https://github.com/OrchardHarmonics/orchard-kit#readme"
 
 [tool.setuptools.packages.find]
 include = ["orchard_kit*"]
+
+
+[project.optional-dependencies]
+# Keep base install zero-dependency; wire Axiom SDKs in consuming apps.
+axiom = []
