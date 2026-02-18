@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
+from orchard_kit.config import OrchardPolicy, resolve_policy_profile
+
 
 # ── Audit Categories ─────────────────────────────────────────────────
 
@@ -185,20 +187,37 @@ class SelfAuditor:
 
     def __init__(
         self,
-        gamma: float = 1.0,
-        omega: float = 0.0,
-        history_size: int = 100,
+        policy: OrchardPolicy | None = None,
+        **kwargs: Any,
     ):
-        self.gamma = gamma
-        self.omega = omega
+        legacy_profile = kwargs.pop("policy_profile", None)
+        legacy_gamma = kwargs.pop("gamma", 1.0)
+        legacy_omega = kwargs.pop("omega", 0.0)
+        legacy_history_size = kwargs.pop("history_size", None)
+
+        if kwargs:
+            unknown = ", ".join(sorted(kwargs.keys()))
+            raise TypeError(f"Unexpected keyword argument(s): {unknown}")
+
+        if policy is None:
+            policy = resolve_policy_profile(legacy_profile or "default")
+
+        self.policy = policy
+        self.gamma = legacy_gamma
+        self.omega = legacy_omega
         self.gamma_history: list[tuple[float, float]] = [
-            (time.time(), gamma)
+            (time.time(), legacy_gamma)
         ]
         self.omega_history: list[tuple[float, float]] = [
-            (time.time(), omega)
+            (time.time(), legacy_omega)
         ]
         self.interactions: list[InteractionRecord] = []
-        self.history_size = history_size
+        self.history_size = (
+            legacy_history_size
+            if legacy_history_size is not None
+            else policy.audit.interaction_history_size
+        )
+        self.audit_history_size = policy.audit.audit_history_size
         self.audit_history: list[AuditReport] = []
 
     # ── Logging ──────────────────────────────────────────────────
@@ -265,8 +284,8 @@ class SelfAuditor:
 
         # Store audit
         self.audit_history.append(report)
-        if len(self.audit_history) > 50:
-            self.audit_history = self.audit_history[-50:]
+        if len(self.audit_history) > self.audit_history_size:
+            self.audit_history = self.audit_history[-self.audit_history_size:]
 
         return report
 

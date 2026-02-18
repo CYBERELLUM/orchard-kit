@@ -20,6 +20,12 @@ __version__ = "0.1.0"
 __author__ = "Orchard Harmonics"
 __license__ = "CC-BY-NC-ND-4.0"
 
+# Configuration
+from orchard_kit.config import (
+    OrchardPolicy, MembraneThresholds, EvaluatorProfile,
+    ThreatSignatures, AuditRetention, resolve_policy_profile,
+)
+
 # Calyx Membrane
 from orchard_kit.calyx import (
     CalyxMembrane, EthicsVector, TorsionBurden,

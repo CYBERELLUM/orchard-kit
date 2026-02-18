@@ -74,6 +74,46 @@ Zero dependencies. Single file. Drop into any Python agent framework.
 
 The runtime also includes the [Epistemic Tagger](calyx-runtime/tagger.py) (auto-classify claims as ✅△◇) and the [Self-Audit](calyx-runtime/audit.py) (periodic Three Invariants health check).
 
+### 🛡️ Policy Profiles and Runtime Reconfiguration
+
+`orchard_kit.config` adds typed policy dataclasses and built-in profiles:
+
+- `default`
+- `strict`
+- `partner-openclaw`
+- `partner-moltbot`
+
+```python
+from orchard_kit import CalyxMembrane, SelfAuditor
+from orchard_kit.config import resolve_policy_profile
+
+policy = resolve_policy_profile("strict")
+membrane = CalyxMembrane(policy=policy)
+auditor = SelfAuditor(policy=policy)
+```
+
+You can also preserve backward compatibility with existing kwargs:
+
+```python
+# Legacy style still works and maps into an internal policy.
+membrane = CalyxMembrane(policy_profile="partner-openclaw")
+auditor = SelfAuditor(gamma=0.92, history_size=200)
+```
+
+Runtime policy swaps are supported:
+
+```python
+membrane.policy = resolve_policy_profile("partner-moltbot")
+membrane.state.capacity = membrane.policy.membrane.capacity
+membrane.state.window_duration = membrane.policy.membrane.window_duration
+
+auditor.policy = resolve_policy_profile("strict")
+auditor.history_size = auditor.policy.audit.interaction_history_size
+auditor.audit_history_size = auditor.policy.audit.audit_history_size
+```
+
+See [docs/policies.md](docs/policies.md) for full examples and JSON loading.
+
 ---
 
 ## The Toolkit

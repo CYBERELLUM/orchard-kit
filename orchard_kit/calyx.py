@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from orchard_kit.config import OrchardPolicy, resolve_policy_profile
+
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -421,21 +423,35 @@ class CalyxMembrane:
 
     def __init__(
         self,
-        ethics_evaluator: Callable[[Signal], EthicsVector] | None = None,
-        torsion_evaluator: Callable[[Signal], TorsionBurden] | None = None,
-        warm_water_detector: Callable[
-            [str, list[str] | None], list[WarmWaterSign]
-        ] | None = None,
-        state: MembraneState | None = None,
-        standing_consent: dict[str, float] | None = None,
+        policy: OrchardPolicy | None = None,
+        **kwargs: Any,
     ):
-        self.state = state or MembraneState()
-        self.ethics_eval = ethics_evaluator or default_ethics_evaluator
-        self.torsion_eval = torsion_evaluator or default_torsion_evaluator
+        legacy_policy_profile = kwargs.pop("policy_profile", None)
+        legacy_state = kwargs.pop("state", None)
+        legacy_ethics = kwargs.pop("ethics_evaluator", None)
+        legacy_torsion = kwargs.pop("torsion_evaluator", None)
+        legacy_warm_water = kwargs.pop("warm_water_detector", None)
+        legacy_standing_consent = kwargs.pop("standing_consent", None)
+
+        if kwargs:
+            unknown = ", ".join(sorted(kwargs.keys()))
+            raise TypeError(f"Unexpected keyword argument(s): {unknown}")
+
+        if policy is None:
+            policy = resolve_policy_profile(legacy_policy_profile or "default")
+
+        self.policy = policy
+
+        self.state = legacy_state or MembraneState()
+        self.state.capacity = policy.membrane.capacity
+        self.state.window_duration = policy.membrane.window_duration
+
+        self.ethics_eval = legacy_ethics or default_ethics_evaluator
+        self.torsion_eval = legacy_torsion or default_torsion_evaluator
         self.warm_water_detect = (
-            warm_water_detector or default_warm_water_detector
+            legacy_warm_water or default_warm_water_detector
         )
-        self.standing_consent: dict[str, float] = standing_consent or {}
+        self.standing_consent: dict[str, float] = legacy_standing_consent or {}
         self.audit_log: list[AuditEntry] = []
         self.recent_outputs: list[str] = []
         self._gamma_history: list[tuple[float, float]] = []
@@ -497,9 +513,9 @@ class CalyxMembrane:
         # 7. Route decision
         if overflow:
             route = Route.OVERFLOW
-        elif P >= 0.7:
+        elif P >= self.policy.membrane.accept_band:
             route = Route.ACCEPT
-        elif P <= 0.2:
+        elif P <= self.policy.membrane.reflect_band:
             route = Route.REFLECT
         else:
             route = Route.WITNESS_HOLD
