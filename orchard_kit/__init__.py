@@ -39,6 +39,11 @@ from orchard_kit.audit import (
     AuditDomain, InteractionRecord, quick_audit,
 )
 
+from orchard_kit.events import (
+    SCHEMA_VERSION, EventEnvelope, EventType,
+    EventSink, FileEventSink, HttpEventSink, CallbackEventSink, EventDispatcher,
+)
+
 # Beacon
 from orchard_kit.beacon import (
     OrchardBeacon, BeaconSignal, OrchardIdentity, ResonanceScore,
